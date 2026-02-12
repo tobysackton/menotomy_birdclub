@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Gallery | Menotomy Bird Club</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="container">
+      <a href="index.html" class="logo">
+        <img src="images/logo.png" alt="Menotomy Bird Club">
+        <span>Menotomy Bird Club</span>
+      </a>
+      <button class="menu-toggle" onclick="document.querySelector('nav').classList.toggle('open')" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+      <nav>
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="calendar.html">Calendar</a></li>
+          <li><a href="trip-reports.html">Trip Reports</a></li>
+          <li><a href="local-birding-spots.html">Local Birding Spots</a></li>
+          <li><a href="about.html">About Us</a></li>
+          <li><a href="photo-gallery.html" class="active">Photo Gallery</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-header">
+      <h1>Photo Gallery</h1>
+      <p>Photos from MBC birding trips. To submit yours, email the <a href="mailto:">webmaster</a>.</p>
+    </div>
+
+    <div class="gallery-grid">
+      <!-- Replace these placeholder images with actual bird photos from the club.
+           Save photos to the images/ folder and update the src paths below. -->
+      <div class="gallery-item">
+        <img src="images/photo-placeholder-1.jpg" alt="Bird photo from MBC trip">
+        <div class="caption">Photo from a Menotomy Bird Club outing</div>
+      </div>
+      <div class="gallery-item">
+        <img src="images/photo-placeholder-2.jpg" alt="Bird photo from MBC trip">
+        <div class="caption">Photo from a Menotomy Bird Club outing</div>
+      </div>
+      <div class="gallery-item">
+        <img src="images/photo-placeholder-3.jpg" alt="Bird photo from MBC trip">
+        <div class="caption">Photo from a Menotomy Bird Club outing</div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2026 Menotomy Bird Club</p>
+      <div class="social-links">
+        <a href="https://www.instagram.com/" target="_blank">Instagram</a>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
