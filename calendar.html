@@ -32,31 +32,21 @@
 
   <main>
     <div class="page-header">
-      <h1>Calendar of Upcoming Events</h1>
+      <h1>Calendar of Trips and Events</h1>
+      <p>Upcoming bird walks and club meetings. Past events are archived at the bottom of the page.</p>
     </div>
 
-    <!-- ==============================================
-         TOCKIFY CALENDAR EMBED
-         ==============================================
-         To activate, replace this placeholder with your
-         Tockify embed code. It will look something like:
+    <div id="calendar-status" class="calendar-status">Loading events…</div>
 
-         <div data-tockify-component="calendar"
-              data-tockify-calendar="your-calendar-name"></div>
-         <script data-tockify-script="embed"
-                 src="https://public.tockify.com/browser/embed.js"></script>
+    <section id="upcoming-section" hidden>
+      <h2 class="calendar-section-header">Upcoming</h2>
+      <div id="upcoming"></div>
+    </section>
 
-         You can get this code from:
-         Tockify Dashboard > Settings > Embed / Share
-         ============================================== -->
-
-    <div class="tockify-container">
-      <div class="tockify-placeholder">
-        <h3>Tockify Calendar</h3>
-        <p>The event calendar will appear here once the Tockify embed code is added.</p>
-        <p style="margin-top:12px; font-size:0.85rem;">See the HTML comments in this file for setup instructions.</p>
-      </div>
-    </div>
+    <details id="archive-section" class="calendar-archive" hidden>
+      <summary>Archive of past trips and meetings</summary>
+      <div id="archive"></div>
+    </details>
   </main>
 
   <footer>
@@ -67,6 +57,275 @@
       </div>
     </div>
   </footer>
+
+  <script>
+  (function () {
+    "use strict";
+
+    const MONTHS_LONG = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    const DAYS_LONG = [
+      "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    ];
+
+    // Parse a "YYYY-MM-DD HH:MM:SS" string as local (America/New_York is
+    // effectively what the repo stores; we treat it as local so we don't
+    // fight timezone offsets on a static page).
+    function parseLocal(s) {
+      if (!s) return null;
+      const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+      if (!m) return null;
+      return new Date(
+        +m[1], +m[2] - 1, +m[3],
+        +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)
+      );
+    }
+
+    function pad(n) { return String(n).padStart(2, "0"); }
+
+    function formatTime(d) {
+      let h = d.getHours();
+      const m = d.getMinutes();
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12; if (h === 0) h = 12;
+      return m === 0 ? `${h} ${ampm}` : `${h}:${pad(m)} ${ampm}`;
+    }
+
+    function formatDateLine(start, end) {
+      const dow = DAYS_LONG[start.getDay()];
+      const mo = MONTHS_LONG[start.getMonth()];
+      const d = start.getDate();
+      const times = end
+        ? `${formatTime(start)} – ${formatTime(end)}`
+        : formatTime(start);
+      return `${dow}, ${mo} ${d} · ${times}`;
+    }
+
+    function monthBucketKey(d) {
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    }
+
+    function monthBucketLabel(d) {
+      return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+    }
+
+    // Minimal HTML sanitization: allow a small whitelist of inline tags
+    // inside event descriptions. The source data comes from our own repo
+    // (WP backfill + email parser), so this is defense-in-depth rather
+    // than a trust boundary.
+    function sanitizeHTML(raw) {
+      if (!raw) return "";
+      const tmpl = document.createElement("template");
+      tmpl.innerHTML = raw;
+      const allowed = new Set(["A", "B", "I", "EM", "STRONG", "BR", "P", "SPAN"]);
+      const walk = (node) => {
+        const kids = Array.from(node.childNodes);
+        for (const k of kids) {
+          if (k.nodeType === 1) {
+            if (!allowed.has(k.tagName)) {
+              // unwrap: replace with its text content
+              const text = document.createTextNode(k.textContent || "");
+              node.replaceChild(text, k);
+              continue;
+            }
+            // Strip all attributes except safe href on <a>
+            for (const attr of Array.from(k.attributes)) {
+              if (k.tagName === "A" && attr.name === "href") {
+                const v = attr.value.trim();
+                if (!/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(v)) {
+                  k.removeAttribute(attr.name);
+                }
+                continue;
+              }
+              if (k.tagName === "A" && attr.name === "target") continue;
+              k.removeAttribute(attr.name);
+            }
+            if (k.tagName === "A") k.setAttribute("rel", "noopener");
+            walk(k);
+          } else if (k.nodeType !== 3) {
+            node.removeChild(k);
+          }
+        }
+      };
+      walk(tmpl.content);
+      return tmpl.innerHTML;
+    }
+
+    function el(tag, attrs, children) {
+      const node = document.createElement(tag);
+      if (attrs) {
+        for (const [k, v] of Object.entries(attrs)) {
+          if (v == null || v === false) continue;
+          if (k === "class") node.className = v;
+          else if (k === "html") node.innerHTML = sanitizeHTML(v);
+          else if (k === "text") node.textContent = v;
+          else node.setAttribute(k, v);
+        }
+      }
+      if (children) {
+        for (const c of children) {
+          if (c == null || c === false) continue;
+          node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+        }
+      }
+      return node;
+    }
+
+    function renderCard(ev) {
+      const start = parseLocal(ev.start);
+      const end = parseLocal(ev.end);
+
+      const photo = ev.photo
+        ? el("img", { class: "event-photo", src: ev.photo, alt: ev.title, loading: "lazy" })
+        : el("div", { class: "event-photo-placeholder", text: "No photo yet" });
+
+      const pill = el("span", {
+        class: `event-pill ${ev.category || "trip"}`,
+        text: ev.category === "meeting" ? "Club Meeting"
+             : ev.category === "other"   ? "Other"
+             :                             "MBC Trip"
+      });
+
+      const title = el("h3", {}, [document.createTextNode(ev.title || "Untitled event"), pill]);
+
+      // Meta line: leader + venue
+      const metaParts = [];
+      if (ev.leader && ev.leader.name) {
+        const leaderText = ev.leader.email
+          ? `Led by ${ev.leader.name}`
+          : `Led by ${ev.leader.name}`;
+        if (ev.leader.email) {
+          const span = el("span", {}, [
+            document.createTextNode("Led by "),
+            el("a", { href: `mailto:${ev.leader.email}` }, [document.createTextNode(ev.leader.name)])
+          ]);
+          metaParts.push(span);
+        } else {
+          metaParts.push(el("span", { text: leaderText }));
+        }
+      }
+      if (ev.venue && ev.venue.name && ev.venue.name !== ev.title) {
+        metaParts.push(el("span", { text: ev.venue.name }));
+      }
+      if (ev.venue && (ev.venue.city || ev.venue.state)) {
+        metaParts.push(el("span", {
+          text: [ev.venue.city, ev.venue.state].filter(Boolean).join(", ")
+        }));
+      }
+
+      const metaRow = el("div", { class: "event-meta" }, metaParts);
+
+      const desc = el("div", { class: "event-desc", html: ev.description || "" });
+
+      const links = [];
+      if (ev.venue && ev.venue.map_url) {
+        links.push(el("a", { href: ev.venue.map_url, target: "_blank" }, [document.createTextNode("Map / directions →")]));
+      }
+      if (ev.venue && ev.venue.ebird_hotspot) {
+        links.push(el("a", { href: ev.venue.ebird_hotspot, target: "_blank" }, [document.createTextNode("eBird hotspot →")]));
+      } else if (ev.ebird_link) {
+        links.push(el("a", { href: ev.ebird_link, target: "_blank" }, [document.createTextNode("eBird →")]));
+      }
+      if (ev.detail_url && ev.source && ev.source.type === "wp_tribe_events") {
+        // archived events keep a link to the original WP event page
+        // (useful until the old site is decommissioned)
+        links.push(el("a", { href: ev.detail_url, target: "_blank" }, [document.createTextNode("Original listing →")]));
+      }
+      const linksRow = links.length ? el("div", { class: "event-links" }, links) : null;
+
+      const body = el("div", { class: "event-body" }, [
+        el("div", { class: "event-date-line", text: formatDateLine(start, end) }),
+        title,
+        metaRow,
+        desc,
+        linksRow,
+      ]);
+
+      return el("article", { class: "event-card" }, [photo, body]);
+    }
+
+    function renderBucketed(container, events) {
+      // Group events by month
+      const buckets = new Map();
+      for (const ev of events) {
+        const d = parseLocal(ev.start);
+        if (!d) continue;
+        const key = monthBucketKey(d);
+        if (!buckets.has(key)) buckets.set(key, { label: monthBucketLabel(d), events: [] });
+        buckets.get(key).events.push(ev);
+      }
+      for (const { label, events: bucketEvents } of buckets.values()) {
+        const hdr = el("h3", { class: "calendar-month-header", text: label });
+        container.appendChild(hdr);
+        for (const ev of bucketEvents) {
+          container.appendChild(renderCard(ev));
+        }
+      }
+    }
+
+    function main() {
+      const status = document.getElementById("calendar-status");
+
+      fetch("data/events.json", { cache: "no-store" })
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then(events => {
+          // Partition into upcoming (start ≥ today midnight) vs past
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const upcoming = [];
+          const past = [];
+          for (const ev of events) {
+            const d = parseLocal(ev.start);
+            if (!d) continue;
+            (d >= today ? upcoming : past).push(ev);
+          }
+          // Upcoming: chronological (ascending)
+          upcoming.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+          // Past: reverse-chronological (most recent first)
+          past.sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+
+          const upcomingSection = document.getElementById("upcoming-section");
+          const upcomingContainer = document.getElementById("upcoming");
+          const archiveSection = document.getElementById("archive-section");
+          const archiveContainer = document.getElementById("archive");
+
+          if (upcoming.length) {
+            upcomingSection.hidden = false;
+            renderBucketed(upcomingContainer, upcoming);
+          } else {
+            upcomingSection.hidden = false;
+            upcomingContainer.appendChild(el("p", {
+              class: "calendar-empty",
+              text: "No upcoming events scheduled yet — check back soon or join the Arlington Birds Google Group for announcements."
+            }));
+          }
+
+          if (past.length) {
+            archiveSection.hidden = false;
+            renderBucketed(archiveContainer, past);
+          }
+
+          status.textContent = `${events.length} events · ${upcoming.length} upcoming · ${past.length} archived`;
+        })
+        .catch(err => {
+          console.error(err);
+          status.textContent = "Couldn't load the calendar. Please reload the page.";
+        });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", main);
+    } else {
+      main();
+    }
+  })();
+  </script>
 
 </body>
 </html>
